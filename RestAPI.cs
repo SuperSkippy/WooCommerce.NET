@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
@@ -38,21 +40,26 @@ namespace WooCommerceNET
         /// <param name="requestBody">If your call doesn't have a body, please pass string.Empty, not null.</param>
         /// <param name="parms"></param>
         /// <returns>json string</returns>
-        public async Task<string> SendHttpClientRequest<T>(string endpoint, RequestMethod method, T requestBody, Dictionary<string, string> parms = null)
+        public async Task<string> SendHttpClientRequest<T>(string endpoint, HttpMethod method, T requestBody, Dictionary<string, string> parms = null)
         {
-            HttpWebRequest httpWebRequest = null;
+            HttpRequestMessage httpWebRequest = new HttpRequestMessage();
             try
             {
-                httpWebRequest = (HttpWebRequest)HttpWebRequest.Create(wc_url + GetOAuthEndPoint(method.ToString(), endpoint, parms));
+                HttpClient hc=new HttpClient();
+                httpWebRequest.RequestUri = new Uri(wc_url + GetOAuthEndPoint(method.ToString(), endpoint, parms));
+
+               
                 if (wc_url.StartsWith("https", StringComparison.OrdinalIgnoreCase))
                 {
-                    httpWebRequest.Credentials = new NetworkCredential(wc_key, wc_secret);
+                    string credentials=Convert.ToBase64String(Encoding.UTF8.GetBytes(string.Format("{0}:{1}",wc_key , wc_secret)));
+
+                    httpWebRequest.Headers.Authorization=new AuthenticationHeaderValue("Basic", credentials);
                 }
 
                 // start the stream immediately
-                httpWebRequest.Method = method.ToString();
-                httpWebRequest.ContentType = "application/json";
-                httpWebRequest.AllowReadStreamBuffering = false;
+                httpWebRequest.Method = method;
+                
+                //httpWebRequest.AllowReadStreamBuffering = false;
                 //if (wc_Proxy)
                 //    httpWebRequest.Proxy.Credentials = CredentialCache.DefaultCredentials;
                 //else
@@ -61,15 +68,19 @@ namespace WooCommerceNET
                 if (requestBody.GetType() != typeof(string))
                 {
                     var buffer = UTF8Encoding.UTF8.GetBytes(SerializeJSon(requestBody));
-                    Stream dataStream = await httpWebRequest.GetRequestStreamAsync();
-                    dataStream.Write(buffer, 0, buffer.Length);
+                    httpWebRequest.Content = new ByteArrayContent(buffer,0,buffer.Length);
+                    httpWebRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
                 }
 
+                HttpResponseMessage response = await hc.SendAsync(httpWebRequest);
+
                 // asynchronously get a response
-                WebResponse wr = await httpWebRequest.GetResponseAsync();
-                return await GetStreamContent(wr.GetResponseStream(), wr.ContentType.Split('=')[1]);
+
+                return await response.Content.ReadAsStringAsync();
+
             }
-            catch (WebException we)
+            /*catch (WebException we)
             {
                 if (httpWebRequest != null && httpWebRequest.HaveResponse)
                     if (we.Response != null)
@@ -78,7 +89,7 @@ namespace WooCommerceNET
                         throw we;
                 else
                     throw we;
-            }
+            }*/
             catch (Exception e)
             {
                 return e.Message;
@@ -87,22 +98,22 @@ namespace WooCommerceNET
 
         public async Task<string> GetRestful(string endpoint, Dictionary<string, string> parms = null)
         {
-            return await SendHttpClientRequest(endpoint, RequestMethod.GET, string.Empty, parms);
+            return await SendHttpClientRequest(endpoint, HttpMethod.Get, string.Empty, parms);
         }
 
         public async Task<string> PostRestful(string endpoint, object jsonObject, Dictionary<string, string> parms = null)
         {
-            return await SendHttpClientRequest(endpoint, RequestMethod.POST, jsonObject, parms);
+            return await SendHttpClientRequest(endpoint, HttpMethod.Post, jsonObject, parms);
         }
 
         public async Task<string> PutRestful(string endpoint, object jsonObject, Dictionary<string, string> parms = null)
         {
-            return await SendHttpClientRequest(endpoint, RequestMethod.PUT, jsonObject, parms);
+            return await SendHttpClientRequest(endpoint, HttpMethod.Put, jsonObject, parms);
         }
 
         public async Task<string> DeleteRestful(string endpoint, Dictionary<string, string> parms = null)
         {
-            return await SendHttpClientRequest(endpoint, RequestMethod.DELETE, string.Empty, parms);
+            return await SendHttpClientRequest(endpoint, HttpMethod.Delete, string.Empty, parms);
         }
 
         private string GetOAuthEndPoint(string method, string endpoint, Dictionary<string, string> parms = null)
@@ -154,21 +165,6 @@ namespace WooCommerceNET
 
             return endpoint + "?" + parmstr.TrimEnd('&');
 
-        }
-
-        private async Task<string> GetStreamContent(Stream s, string charset)
-        {
-            StringBuilder sb = new StringBuilder();
-            byte[] Buffer = new byte[512];
-            int count = 0;
-            count = await s.ReadAsync(Buffer, 0, Buffer.Length);
-            while (count > 0)
-            {
-                sb.Append(Encoding.GetEncoding(charset).GetString(Buffer, 0, count));
-                count = await s.ReadAsync(Buffer, 0, Buffer.Length);
-            }
-
-            return sb.ToString();
         }
 
         public static string SerializeJSon<T>(T t)
